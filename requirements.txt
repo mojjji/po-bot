@@ -1,0 +1,4 @@
+pocketoptionapi
+pandas
+numpy
+flask
