@@ -1,4 +1,4 @@
-git+[https://github.com/ericpedra/pocketoptionapi.git](https://github.com/ericpedra/pocketoptionapi.git)
+git+https://github.com/ericpedra/pocketoptionapi.git
 pandas
 numpy
 flask 
