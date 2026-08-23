@@ -1,4 +1,4 @@
-pocketoptionapi
+git+https://github.com/lu-yi-hsun/pocketoptionapi.git
 pandas
 numpy
-flask
+flask 
