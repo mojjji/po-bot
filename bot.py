@@ -31,14 +31,13 @@ def apply_strategy(df):
 async def run_async_bot():
     print("Starting Modern Async Cloud Bot...")
     ssid = os.environ.get("POCKET_SSID")
-    proxy_url = os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
 
     if not ssid:
         print("ERROR: POCKET_SSID not found in environment!")
         return
 
-    # Initialize the async client with your Webshare proxy
-    api = AsyncPocketOptionClient(ssid=ssid, is_demo=True, proxy=proxy_url)
+    # Initialize client (uses HTTP_PROXY/HTTPS_PROXY directly from Render's environment)
+    api = AsyncPocketOptionClient(ssid=ssid, is_demo=True)
     await api.connect()
     
     balance_info = await api.get_balance()
