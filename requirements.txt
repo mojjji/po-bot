@@ -2,4 +2,4 @@ flask
 pandas
 numpy
 pocketoptionapi-async
-playwright 
+playwright==1.48.0 
