@@ -4,6 +4,7 @@ import threading
 import pandas as pd
 import numpy as np
 from flask import Flask
+from playwright.async_api import async_playwright
 from pocketoptionapi_async import AsyncPocketOptionClient, OrderDirection
 
 app = Flask(__name__)
@@ -27,16 +28,62 @@ def apply_strategy(df):
     df['rsi'] = 100 - (100 / (1 + rs))
     return df
 
+# Helper to automatically capture SSID using Playwright
+async def get_automated_ssid(email, password):
+    ssid_captured = None
+    print("Launching headless browser to harvest fresh SSID...")
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context()
+        page = await context.new_page()
+
+        def handle_ws(ws):
+            nonlocal ssid_captured
+            def handle_frame(frame):
+                nonlocal ssid_captured
+                if frame.text and frame.text.startswith('42["auth"'):
+                    ssid_captured = frame.text
+            ws.on("framesent", handle_frame)
+
+        page.on("websocket", handle_ws)
+
+        try:
+            await page.goto("https://pocketoption.com/en/login", wait_until="networkidle")
+            await page.fill('input[name="email"]', email)
+            await page.fill('input[name="password"]', password)
+            await page.click('button[type="submit"]')
+            
+            # Wait up to 30 seconds for the WS authentication frame
+            for _ in range(30):
+                if ssid_captured:
+                    print("Successfully harvested fresh SSID!")
+                    break
+                await asyncio.sleep(1)
+        except Exception as e:
+            print(f"Error during browser automation: {e}")
+        finally:
+            await browser.close()
+            
+    return ssid_captured
+
 # Main Async Bot Logic
 async def run_async_bot():
     print("Starting Modern Async Cloud Bot...")
+    
+    # Try getting SSID from environment first, or harvest automatically
     ssid = os.environ.get("POCKET_SSID")
+    email = os.environ.get("POCKET_EMAIL")
+    password = os.environ.get("POCKET_PASSWORD")
+
+    if not ssid and email and password:
+        ssid = await get_automated_ssid(email, password)
 
     if not ssid:
-        print("ERROR: POCKET_SSID not found in environment!")
+        print("ERROR: Could not retrieve a valid POCKET_SSID!")
         return
 
-    # Initialize client (uses HTTP_PROXY/HTTPS_PROXY directly from Render's environment)
+    # Initialize client (routes through Render environment proxy)
     api = AsyncPocketOptionClient(ssid=ssid, is_demo=True)
     await api.connect()
     
@@ -45,12 +92,11 @@ async def run_async_bot():
     
     pairs = ["EURUSD_otc", "GBPUSD_otc", "USDJPY_otc", "AUDUSD_otc"]
     trade_amount = 1.0
-    trade_duration = 60 # in seconds
+    trade_duration = 60
     
     while True:
         try:
             for pair in pairs:
-                # Fetch candles asynchronously
                 candles = await api.get_candles_dataframe(asset=pair, timeframe=60, count=200)
                 if candles is None or candles.empty:
                     continue
@@ -59,36 +105,31 @@ async def run_async_bot():
                 current = df.iloc[-1]
                 prev = df.iloc[-2]
                 
-                # CALL Logic (Uptrend + Bottom Band + Oversold)
                 if current['close'] > current['ema_200']:
                     if prev['close'] <= current['lower_band'] and current['rsi'] < 30:
                         print(f"[{pair}] CALL Signal. Executing...")
                         await api.place_order(asset=pair, amount=trade_amount, direction=OrderDirection.CALL, duration=trade_duration)
                         await asyncio.sleep(65)
                 
-                # PUT Logic (Downtrend + Top Band + Overbought)
                 elif current['close'] < current['ema_200']:
                     if prev['close'] >= current['upper_band'] and current['rsi'] > 70:
                         print(f"[{pair}] PUT Signal. Executing...")
                         await api.place_order(asset=pair, amount=trade_amount, direction=OrderDirection.PUT, duration=trade_duration)
                         await asyncio.sleep(65)
             
-            await asyncio.sleep(10) # Rest before next scan
+            await asyncio.sleep(10)
         except Exception as e:
             print(f"Error in loop: {e}")
             await asyncio.sleep(10)
 
-# Wrapper to run async functions inside a background thread
 def start_bot_thread():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(run_async_bot())
 
 if __name__ == "__main__":
-    # Start the async bot in the background
     bot_thread = threading.Thread(target=start_bot_thread)
     bot_thread.start()
     
-    # Start the dummy web server for Render
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port) 
