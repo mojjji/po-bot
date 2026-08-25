@@ -34,21 +34,29 @@ async def get_automated_ssid(email, password):
     print("Launching headless browser to harvest fresh SSID...")
     
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context()
-        page = await context.new_page()
-
-        def handle_ws(ws):
-            nonlocal ssid_captured
-            def handle_frame(frame):
-                nonlocal ssid_captured
-                if frame.text and frame.text.startswith('42["auth"'):
-                    ssid_captured = frame.text
-            ws.on("framesent", handle_frame)
-
-        page.on("websocket", handle_ws)
-
         try:
+            # Added Docker flags to prevent Chromium from hanging on Render
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage"
+                ]
+            )
+            context = await browser.new_context()
+            page = await context.new_page()
+
+            def handle_ws(ws):
+                nonlocal ssid_captured
+                def handle_frame(frame):
+                    nonlocal ssid_captured
+                    if frame.text and frame.text.startswith('42["auth"'):
+                        ssid_captured = frame.text
+                ws.on("framesent", handle_frame)
+
+            page.on("websocket", handle_ws)
+
             await page.goto("https://pocketoption.com/en/login", wait_until="networkidle")
             await page.fill('input[name="email"]', email)
             await page.fill('input[name="password"]', password)
@@ -60,10 +68,12 @@ async def get_automated_ssid(email, password):
                     print("Successfully harvested fresh SSID!")
                     break
                 await asyncio.sleep(1)
+
         except Exception as e:
             print(f"Error during browser automation: {e}")
         finally:
-            await browser.close()
+            if 'browser' in locals():
+                await browser.close()
             
     return ssid_captured
 
@@ -71,7 +81,6 @@ async def get_automated_ssid(email, password):
 async def run_async_bot():
     print("Starting Modern Async Cloud Bot...")
     
-    # Try getting SSID from environment first, or harvest automatically
     ssid = os.environ.get("POCKET_SSID")
     email = os.environ.get("POCKET_EMAIL")
     password = os.environ.get("POCKET_PASSWORD")
@@ -83,7 +92,7 @@ async def run_async_bot():
         print("ERROR: Could not retrieve a valid POCKET_SSID!")
         return
 
-    # Initialize client (routes through Render environment proxy)
+    # Initialize client
     api = AsyncPocketOptionClient(ssid=ssid, is_demo=True)
     await api.connect()
     
@@ -122,14 +131,14 @@ async def run_async_bot():
             print(f"Error in loop: {e}")
             await asyncio.sleep(10)
 
-def start_bot_thread():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(run_async_bot())
+def start_flask():
+    """Runs Flask in a background daemon thread for Render health checks."""
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
 
 if __name__ == "__main__":
-    bot_thread = threading.Thread(target=start_bot_thread)
-    bot_thread.start()
+    # 1. Start Flask web server in a background thread
+    threading.Thread(target=start_flask, daemon=True).start()
     
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port) 
+    # 2. Run the main bot loop on the primary thread
+    asyncio.run(run_async_bot())
