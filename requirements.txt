@@ -1,5 +1,5 @@
-pocketoptionapi-async
+flask
 pandas
 numpy
-flask 
-websockets==13.1
+pocketoptionapi-async
+playwright 
